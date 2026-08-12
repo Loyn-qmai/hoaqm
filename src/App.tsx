@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { SAMPLE_FLOWERS } from './data/flowers';
 import { FlowerItem, OccasionId, FlowerCategory } from './types';
+import { convertGoogleDriveUrl } from './utils/format';
 import { Navbar } from './components/Navbar';
 import { FlowerGrid } from './components/FlowerGrid';
 import { FlowerDetailModal } from './components/FlowerDetailModal';
@@ -11,6 +12,9 @@ import { Heart, X } from 'lucide-react';
 
 const STORAGE_KEY = 'qm_flowers_v2';
 
+// Helper to normalize flower names for duplicate matching
+const normalizeName = (s?: string) => (s || '').toLowerCase().trim().replace(/\s+/g, ' ');
+
 export default function App() {
   // Load saved flowers from localStorage or initialize with SAMPLE_FLOWERS
   const [flowers, setFlowers] = useState<FlowerItem[]>(() => {
@@ -19,13 +23,32 @@ export default function App() {
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
+          // Deduplicate saved list by name on load
+          const seen = new Set<string>();
+          const deduped: FlowerItem[] = [];
+          
+          parsed.forEach((item: FlowerItem, idx: number) => {
+            const norm = normalizeName(item.name);
+            if (!norm || !seen.has(norm)) {
+              if (norm) seen.add(norm);
+              deduped.push({
+                ...item,
+                imageUrl: convertGoogleDriveUrl(item.imageUrl) || item.imageUrl,
+                createdAt: item.createdAt || (Date.now() - idx * 60000),
+              });
+            }
+          });
+          return deduped;
         }
       }
     } catch (e) {
       console.error('Failed to load flowers from storage', e);
     }
-    return SAMPLE_FLOWERS;
+    return SAMPLE_FLOWERS.map((item, idx) => ({
+      ...item,
+      imageUrl: convertGoogleDriveUrl(item.imageUrl) || item.imageUrl,
+      createdAt: item.createdAt || (Date.now() - idx * 60000),
+    }));
   });
 
   const [favorites, setFavorites] = useState<string[]>(['flower-1', 'flower-4']);
@@ -61,13 +84,59 @@ export default function App() {
 
   const handleSaveFlower = (savedFlower: FlowerItem) => {
     setFlowers((prev) => {
-      const index = prev.findIndex((f) => f.id === savedFlower.id);
-      if (index > -1) {
+      const targetName = normalizeName(savedFlower.name);
+      const now = Date.now();
+      const flowerWithTime = { ...savedFlower, createdAt: savedFlower.createdAt || now };
+      
+      // Find existing flower by ID or matching normalized name
+      const existingIndex = prev.findIndex(
+        (f) => f.id === savedFlower.id || (targetName && normalizeName(f.name) === targetName)
+      );
+
+      if (existingIndex > -1) {
+        const existingId = prev[existingIndex].id;
         const updated = [...prev];
-        updated[index] = savedFlower;
-        return updated;
+        updated[existingIndex] = { ...flowerWithTime, id: existingId, createdAt: now };
+        
+        // Remove any other duplicate items with the same name
+        return updated.filter(
+          (item, idx) => idx === existingIndex || !targetName || normalizeName(item.name) !== targetName
+        );
       }
-      return [savedFlower, ...prev];
+
+      return [{ ...flowerWithTime, createdAt: now }, ...prev];
+    });
+  };
+
+  const handleBatchImportFlowers = (importedList: FlowerItem[]) => {
+    setFlowers((prev) => {
+      let currentList = [...prev];
+      const baseTime = Date.now();
+
+      importedList.forEach((newItem, idx) => {
+        const targetName = normalizeName(newItem.name);
+        if (!targetName) return;
+
+        const now = baseTime + (importedList.length - idx) * 1000;
+        const itemWithTime = { ...newItem, createdAt: now };
+
+        const existingIndex = currentList.findIndex(
+          (f) => f.id === newItem.id || normalizeName(f.name) === targetName
+        );
+
+        if (existingIndex > -1) {
+          const existingId = currentList[existingIndex].id;
+          currentList[existingIndex] = { ...itemWithTime, id: existingId };
+          // Remove duplicate old items with same name
+          currentList = currentList.filter(
+            (item, idx) => idx === existingIndex || normalizeName(item.name) !== targetName
+          );
+        } else {
+          currentList = [itemWithTime, ...currentList];
+        }
+      });
+
+      return currentList;
     });
   };
 
@@ -76,9 +145,17 @@ export default function App() {
   };
 
   const handleResetDefaultFlowers = () => {
-    if (confirm('Bạn có chắc muốn khôi phục danh sách hoa về dữ liệu mẫu ban đầu?')) {
-      setFlowers(SAMPLE_FLOWERS);
+    const now = Date.now();
+    const formattedDefaults = SAMPLE_FLOWERS.map((item, idx) => ({
+      ...item,
+      imageUrl: convertGoogleDriveUrl(item.imageUrl) || item.imageUrl,
+      createdAt: now - idx * 60000,
+    }));
+    setFlowers(formattedDefaults);
+    try {
       localStorage.removeItem(STORAGE_KEY);
+    } catch (e) {
+      console.error(e);
     }
   };
 
@@ -137,6 +214,7 @@ export default function App() {
         onClose={() => setIsAdminOpen(false)}
         flowers={flowers}
         onSaveFlower={handleSaveFlower}
+        onBatchImportFlowers={handleBatchImportFlowers}
         onDeleteFlower={handleDeleteFlower}
         onResetDefault={handleResetDefaultFlowers}
       />

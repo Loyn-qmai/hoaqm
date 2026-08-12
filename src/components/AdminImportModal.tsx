@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import Papa from 'papaparse';
 import { FlowerItem, FlowerCategory } from '../types';
 import { getMatchingFlowerImage } from '../utils/imageMatcher';
-import { formatVND, convertGoogleDriveUrl } from '../utils/format';
+import { formatVND, convertGoogleDriveUrl, parsePrice } from '../utils/format';
 import {
   X,
   FileSpreadsheet,
@@ -60,25 +60,6 @@ export const AdminImportModal: React.FC<AdminImportModalProps> = ({
     if (text.includes('hướng dương') || text.includes('huong-duong')) return 'huong-duong';
     if (text.includes('tulip')) return 'tulip';
     return 'hoa-hong';
-  };
-
-  // Helper to sanitize price strings (e.g. "350k" -> 350000, "1.200.000đ" -> 1200000)
-  const parsePrice = (val: any): number => {
-    if (typeof val === 'number') return val;
-    if (!val) return 200000;
-    let str = String(val).toLowerCase().trim();
-    if (str.includes('k')) {
-      const num = parseFloat(str.replace('k', ''));
-      return isNaN(num) ? 200000 : Math.round(num * 1000);
-    }
-    if (str.includes('tr') || str.includes('m')) {
-      const num = parseFloat(str.replace(/tr|m/g, ''));
-      return isNaN(num) ? 200000 : Math.round(num * 1000000);
-    }
-    // Remove non-digit chars
-    const cleaned = str.replace(/[^\d]/g, '');
-    const num = parseInt(cleaned, 10);
-    return isNaN(num) ? 200000 : num;
   };
 
   // Process raw rows (CSV/Excel array objects)
@@ -375,10 +356,12 @@ export const AdminImportModal: React.FC<AdminImportModalProps> = ({
     if (previewItems.length === 0) return;
 
     const finalFlowers: FlowerItem[] = previewItems.map((item) => {
-      // If image is missing or user checked autoMatch, fill with matching image
+      // If image is missing, fill with matching image
       let finalImg = item.imageUrl || '';
-      if (!finalImg || autoMatchMissingImages) {
+      if (!finalImg) {
         finalImg = getMatchingFlowerImage(item.name || '', item.category);
+      } else {
+        finalImg = convertGoogleDriveUrl(finalImg) || finalImg;
       }
 
       return {
@@ -673,7 +656,7 @@ export const AdminImportModal: React.FC<AdminImportModalProps> = ({
                   </thead>
                   <tbody className="divide-y divide-stone-100">
                     {previewItems.map((item, idx) => {
-                      const matchedImg = item.imageUrl || getMatchingFlowerImage(item.name || '', item.category);
+                      const displayImg = convertGoogleDriveUrl(item.imageUrl) || item.imageUrl || getMatchingFlowerImage(item.name || '', item.category);
                       return (
                         <tr key={idx} className="hover:bg-stone-50">
                           <td className="py-2 px-3 text-stone-400">{idx + 1}</td>
@@ -683,15 +666,22 @@ export const AdminImportModal: React.FC<AdminImportModalProps> = ({
                           <td className="py-2 px-3">
                             <div className="flex items-center gap-2">
                               <img
-                                src={matchedImg}
+                                src={displayImg}
                                 alt={item.name}
+                                referrerPolicy="no-referrer"
                                 className="w-8 h-8 object-cover rounded border border-stone-200"
                                 onError={(e) => {
                                   const target = e.currentTarget;
-                                  if (target.src.includes('drive.google.com/thumbnail')) {
+                                  if (target.src.includes('lh3.googleusercontent.com/d/')) {
+                                    const fileIdMatch = target.src.match(/\/d\/([a-zA-Z0-9_-]+)/);
+                                    if (fileIdMatch && fileIdMatch[1]) {
+                                      target.src = `https://drive.google.com/thumbnail?id=${fileIdMatch[1]}&sz=w1000`;
+                                      return;
+                                    }
+                                  } else if (target.src.includes('drive.google.com/thumbnail')) {
                                     const fileIdMatch = target.src.match(/id=([a-zA-Z0-9_-]+)/);
                                     if (fileIdMatch && fileIdMatch[1]) {
-                                      target.src = `https://lh3.googleusercontent.com/d/${fileIdMatch[1]}`;
+                                      target.src = `https://drive.google.com/uc?export=view&id=${fileIdMatch[1]}`;
                                       return;
                                     }
                                   }

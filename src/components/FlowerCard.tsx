@@ -1,7 +1,7 @@
 import React from 'react';
 import { Heart, Eye, ShoppingBag, Star, Sparkles, Check } from 'lucide-react';
 import { FlowerItem } from '../types';
-import { formatVND, calculateDiscountPercentage } from '../utils/format';
+import { formatVND, calculateDiscountPercentage, convertGoogleDriveUrl } from '../utils/format';
 import { getMatchingFlowerImage } from '../utils/imageMatcher';
 
 interface FlowerCardProps {
@@ -27,16 +27,22 @@ export const FlowerCard: React.FC<FlowerCardProps> = ({
       {/* Top Image Container */}
       <div className="relative aspect-1/1 w-full overflow-hidden bg-stone-100">
         <img
-          src={flower.imageUrl}
+          src={convertGoogleDriveUrl(flower.imageUrl) || flower.imageUrl || getMatchingFlowerImage(flower.name, flower.category)}
           alt={flower.name}
           referrerPolicy="no-referrer"
           className="w-full h-full object-cover group-hover:scale-108 transition-transform duration-700 ease-out"
           onError={(e) => {
             const target = e.currentTarget;
-            if (target.src.includes('drive.google.com/thumbnail')) {
+            if (target.src.includes('lh3.googleusercontent.com/d/')) {
+              const fileIdMatch = target.src.match(/\/d\/([a-zA-Z0-9_-]+)/);
+              if (fileIdMatch && fileIdMatch[1]) {
+                target.src = `https://drive.google.com/thumbnail?id=${fileIdMatch[1]}&sz=w1000`;
+                return;
+              }
+            } else if (target.src.includes('drive.google.com/thumbnail')) {
               const fileIdMatch = target.src.match(/id=([a-zA-Z0-9_-]+)/);
               if (fileIdMatch && fileIdMatch[1]) {
-                target.src = `https://lh3.googleusercontent.com/d/${fileIdMatch[1]}`;
+                target.src = `https://drive.google.com/uc?export=view&id=${fileIdMatch[1]}`;
                 return;
               }
             }

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { FlowerItem, FlowerCategory } from '../types';
 import { CATEGORIES } from '../data/flowers';
-import { formatVND, convertGoogleDriveUrl } from '../utils/format';
+import { formatVND, convertGoogleDriveUrl, calculateDiscountPercentage } from '../utils/format';
 import { getMatchingFlowerImage } from '../utils/imageMatcher';
 import { AdminImportModal } from './AdminImportModal';
 import { X, Plus, Edit2, Trash2, Save, RotateCcw, Check, ShieldCheck, FileSpreadsheet, Wand2, Sparkles, Tag, UploadCloud, Percent, Image as ImageIcon } from 'lucide-react';
@@ -11,6 +11,7 @@ interface AdminModalProps {
   onClose: () => void;
   flowers: FlowerItem[];
   onSaveFlower: (flower: FlowerItem) => void;
+  onBatchImportFlowers?: (importedFlowers: FlowerItem[]) => void;
   onDeleteFlower: (id: string) => void;
   onResetDefault: () => void;
 }
@@ -32,6 +33,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   onClose,
   flowers,
   onSaveFlower,
+  onBatchImportFlowers,
   onDeleteFlower,
   onResetDefault,
 }) => {
@@ -40,6 +42,10 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [showSavedNotification, setShowSavedNotification] = useState(false);
   const [notificationText, setNotificationText] = useState('Đã cập nhật danh sách sản phẩm thành công!');
+
+  // Confirmation modal states
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [deletingFlowerItem, setDeletingFlowerItem] = useState<FlowerItem | null>(null);
 
   if (!isOpen) return null;
 
@@ -100,10 +106,14 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   };
 
   const handleBatchImport = (importedFlowers: FlowerItem[]) => {
-    importedFlowers.forEach((item) => {
-      onSaveFlower(item);
-    });
-    triggerNotification(`🎉 Đã nhập thành công ${importedFlowers.length} mẫu hoa vào hệ thống!`);
+    if (onBatchImportFlowers) {
+      onBatchImportFlowers(importedFlowers);
+    } else {
+      importedFlowers.forEach((item) => {
+        onSaveFlower(item);
+      });
+    }
+    triggerNotification(`🎉 Đã nhập & tự động cập nhật ${importedFlowers.length} mẫu hoa vào hệ thống!`);
   };
 
   const handleLocalImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -269,7 +279,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                     type="number"
                     required
                     min={0}
-                    step={10000}
+                    step="any"
                     placeholder="200000"
                     value={editingFlower.price || ''}
                     onChange={(e) => setEditingFlower({ ...editingFlower, price: Number(e.target.value) })}
@@ -348,8 +358,8 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                         </label>
                         <input
                           type="number"
-                          step={10000}
-                          min={Number(editingFlower.price || 0) + 10000}
+                          step="any"
+                          min={Number(editingFlower.price || 0) + 1000}
                           value={editingFlower.originalPrice || ''}
                           onChange={(e) => {
                             const orig = Number(e.target.value);
@@ -518,12 +528,26 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                   {editingFlower.imageUrl && (
                     <div className="mt-2 flex items-center gap-3 bg-white p-2.5 rounded-xl border border-stone-200">
                       <img
-                        src={editingFlower.imageUrl}
+                        src={convertGoogleDriveUrl(editingFlower.imageUrl || '') || editingFlower.imageUrl || getMatchingFlowerImage(editingFlower.name || '', editingFlower.category)}
                         alt="Preview"
+                        referrerPolicy="no-referrer"
                         className="w-20 h-20 object-cover rounded-lg border border-stone-300 shadow-2xs"
                         onError={(e) => {
-                          (e.target as HTMLImageElement).src =
-                            'https://images.unsplash.com/photo-1561181286-d3fee7d55364?auto=format&fit=crop&w=800&q=80';
+                          const target = e.currentTarget;
+                          if (target.src.includes('lh3.googleusercontent.com/d/')) {
+                            const fileIdMatch = target.src.match(/\/d\/([a-zA-Z0-9_-]+)/);
+                            if (fileIdMatch && fileIdMatch[1]) {
+                              target.src = `https://drive.google.com/thumbnail?id=${fileIdMatch[1]}&sz=w1000`;
+                              return;
+                            }
+                          } else if (target.src.includes('drive.google.com/thumbnail')) {
+                            const fileIdMatch = target.src.match(/id=([a-zA-Z0-9_-]+)/);
+                            if (fileIdMatch && fileIdMatch[1]) {
+                              target.src = `https://drive.google.com/uc?export=view&id=${fileIdMatch[1]}`;
+                              return;
+                            }
+                          }
+                          target.src = getMatchingFlowerImage(editingFlower.name || '', editingFlower.category);
                         }}
                       />
                       <div className="space-y-1">
@@ -598,11 +622,11 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                   </button>
 
                   <button
-                    onClick={onResetDefault}
-                    className="px-3 py-2 rounded-lg text-xs font-medium text-stone-600 bg-stone-100 hover:bg-stone-200 flex items-center gap-1.5 transition-colors"
-                    title="Khôi phục danh sách mẫu ban đầu"
+                    onClick={() => setShowResetConfirm(true)}
+                    className="px-3.5 py-2 rounded-lg text-xs font-bold text-amber-900 bg-amber-50 hover:bg-amber-100 border border-amber-200/80 flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
+                    title="Khôi phục danh sách hoa về 24 mẫu mặc định ban đầu"
                   >
-                    <RotateCcw className="w-3.5 h-3.5" />
+                    <RotateCcw className="w-3.5 h-3.5 text-amber-700" />
                     <span>Khôi phục mẫu</span>
                   </button>
 
@@ -616,68 +640,196 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                 </div>
               </div>
 
+              {/* Products Table Header Actions */}
+              <div className="flex flex-wrap items-center justify-between gap-2 bg-stone-100/80 p-3 rounded-xl border border-stone-200/80 text-xs text-stone-600">
+                <span className="font-semibold text-stone-700">Tùy chỉnh nhanh trạng thái trực tiếp:</span>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      flowers.forEach((f) => {
+                        if (f.inStock === false) {
+                          onSaveFlower({ ...f, inStock: true });
+                        }
+                      });
+                      triggerNotification('✅ Đã cập nhật TẤT CẢ sản phẩm sang CÒN HÀNG!');
+                    }}
+                    className="px-2.5 py-1 bg-white hover:bg-emerald-50 text-emerald-800 border border-stone-200 rounded-lg font-medium transition-colors cursor-pointer shadow-2xs"
+                  >
+                    + Tất cả Còn hàng
+                  </button>
+                  <button
+                    onClick={() => {
+                      flowers.forEach((f) => {
+                        if (!f.originalPrice || f.originalPrice <= f.price) {
+                          onSaveFlower({
+                            ...f,
+                            originalPrice: Math.round((f.price * 1.2) / 1000) * 1000,
+                          });
+                        }
+                      });
+                      triggerNotification('🔥 Đã BẬT giảm giá 20% cho toàn bộ sản phẩm!');
+                    }}
+                    className="px-2.5 py-1 bg-white hover:bg-rose-50 text-rose-700 border border-stone-200 rounded-lg font-medium transition-colors cursor-pointer shadow-2xs"
+                  >
+                    + Bật giảm giá hàng loạt
+                  </button>
+                  <button
+                    onClick={() => {
+                      flowers.forEach((f) => {
+                        if (f.originalPrice) {
+                          onSaveFlower({ ...f, originalPrice: undefined });
+                        }
+                      });
+                      triggerNotification('⚪ Đã TẮT giảm giá cho tất cả sản phẩm!');
+                    }}
+                    className="px-2.5 py-1 bg-white hover:bg-stone-200 text-stone-600 border border-stone-200 rounded-lg font-medium transition-colors cursor-pointer shadow-2xs"
+                  >
+                    - Tắt tất cả giảm giá
+                  </button>
+                </div>
+              </div>
+
               {/* Products Table */}
               <div className="bg-white rounded-xl border border-stone-200 overflow-hidden shadow-xs">
                 <div className="overflow-x-auto">
                   <table className="w-full text-left border-collapse">
                     <thead>
                       <tr className="bg-stone-100/80 text-stone-700 text-xs font-bold uppercase border-b border-stone-200">
-                        <th className="py-3 px-4">Ảnh</th>
-                        <th className="py-3 px-4">Tên Sản Phẩm</th>
-                        <th className="py-3 px-4">Danh Mục</th>
-                        <th className="py-3 px-4">Giá Bán</th>
-                        <th className="py-3 px-4">Số Lượng Đi Kèm</th>
-                        <th className="py-3 px-4 text-center">Thao Tác</th>
+                        <th className="py-3 px-3">Ảnh</th>
+                        <th className="py-3 px-3">Tên Sản Phẩm</th>
+                        <th className="py-3 px-3">Giá Bán</th>
+                        <th className="py-3 px-3 text-center bg-rose-50/80 text-rose-800 border-x border-rose-100">
+                          🔥 Giảm Giá
+                        </th>
+                        <th className="py-3 px-3 text-center bg-emerald-50/80 text-emerald-800 border-r border-emerald-100">
+                          📦 Còn Hàng
+                        </th>
+                        <th className="py-3 px-3">Quy Cách</th>
+                        <th className="py-3 px-3 text-center">Thao Tác</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-stone-100 text-xs">
-                      {flowers.map((flower) => (
-                        <tr key={flower.id} className="hover:bg-rose-50/40 transition-colors">
-                          <td className="py-3 px-4">
-                            <img
-                              src={flower.imageUrl}
-                              alt={flower.name}
-                              className="w-12 h-12 object-cover rounded-lg border border-stone-200"
-                            />
-                          </td>
-                          <td className="py-3 px-4 font-semibold text-stone-900 max-w-xs">
-                            {flower.name}
-                          </td>
-                          <td className="py-3 px-4 text-stone-600">
-                            <span className="bg-stone-100 text-stone-700 px-2 py-0.5 rounded text-[11px]">
-                              {flower.categoryName}
-                            </span>
-                          </td>
-                          <td className="py-3 px-4 font-bold text-rose-700 text-sm">
-                            {formatVND(flower.price)}
-                          </td>
-                          <td className="py-3 px-4 font-medium text-emerald-800 bg-emerald-50/60 rounded">
-                            {flower.unitQuantity || '10 cành'}
-                          </td>
-                          <td className="py-3 px-4 text-center">
-                            <div className="flex items-center justify-center gap-2">
-                              <button
-                                onClick={() => handleStartEdit(flower)}
-                                className="p-1.5 text-stone-700 hover:text-rose-600 hover:bg-rose-100 rounded-lg transition-colors"
-                                title="Sửa thông tin sản phẩm"
-                              >
-                                <Edit2 className="w-4 h-4" />
-                              </button>
-                              <button
-                                onClick={() => {
-                                  if (confirm(`Bạn có chắc muốn xóa sản phẩm "${flower.name}"?`)) {
-                                    onDeleteFlower(flower.id);
+                      {flowers.map((flower) => {
+                        const hasDiscount = Boolean(flower.originalPrice && flower.originalPrice > flower.price);
+                        const isInStock = flower.inStock !== false;
+                        const discountPct = calculateDiscountPercentage(flower.price, flower.originalPrice);
+
+                        return (
+                          <tr key={flower.id} className="hover:bg-rose-50/40 transition-colors">
+                            <td className="py-3 px-3">
+                              <img
+                                src={convertGoogleDriveUrl(flower.imageUrl) || flower.imageUrl || getMatchingFlowerImage(flower.name, flower.category)}
+                                alt={flower.name}
+                                referrerPolicy="no-referrer"
+                                className="w-12 h-12 object-cover rounded-lg border border-stone-200 shadow-2xs"
+                                onError={(e) => {
+                                  const target = e.currentTarget;
+                                  if (target.src.includes('lh3.googleusercontent.com/d/')) {
+                                    const fileIdMatch = target.src.match(/\/d\/([a-zA-Z0-9_-]+)/);
+                                    if (fileIdMatch && fileIdMatch[1]) {
+                                      target.src = `https://drive.google.com/thumbnail?id=${fileIdMatch[1]}&sz=w1000`;
+                                      return;
+                                    }
+                                  } else if (target.src.includes('drive.google.com/thumbnail')) {
+                                    const fileIdMatch = target.src.match(/id=([a-zA-Z0-9_-]+)/);
+                                    if (fileIdMatch && fileIdMatch[1]) {
+                                      target.src = `https://drive.google.com/uc?export=view&id=${fileIdMatch[1]}`;
+                                      return;
+                                    }
                                   }
+                                  target.src = getMatchingFlowerImage(flower.name, flower.category);
                                 }}
-                                className="p-1.5 text-stone-400 hover:text-rose-700 hover:bg-rose-100 rounded-lg transition-colors"
-                                title="Xóa sản phẩm"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
+                              />
+                            </td>
+                            <td className="py-3 px-3 font-semibold text-stone-900 max-w-xs">
+                              <div>{flower.name}</div>
+                              <span className="text-[10px] text-stone-500 font-normal">{flower.categoryName}</span>
+                            </td>
+                            <td className="py-3 px-3">
+                              <div className="font-bold text-rose-700 text-sm">{formatVND(flower.price)}</div>
+                              {hasDiscount && (
+                                <div className="text-[10px] text-stone-400 line-through">
+                                  {formatVND(flower.originalPrice)}
+                                </div>
+                              )}
+                            </td>
+
+                            {/* Direct Toggle: Giảm giá */}
+                            <td className="py-3 px-3 text-center bg-rose-50/20 border-x border-rose-100/50">
+                              <label className="inline-flex items-center justify-center gap-1.5 cursor-pointer bg-white px-2.5 py-1.5 rounded-lg border border-stone-200 hover:border-rose-300 shadow-2xs transition-all select-none">
+                                <input
+                                  type="checkbox"
+                                  checked={hasDiscount}
+                                  onChange={(e) => {
+                                    const isChecked = e.target.checked;
+                                    let updatedOriginalPrice: number | undefined = undefined;
+                                    if (isChecked) {
+                                      updatedOriginalPrice = flower.originalPrice && flower.originalPrice > flower.price
+                                        ? flower.originalPrice
+                                        : Math.round((flower.price * 1.2) / 1000) * 1000;
+                                    }
+                                    onSaveFlower({ ...flower, originalPrice: updatedOriginalPrice });
+                                    triggerNotification(
+                                      isChecked
+                                        ? `🔥 Đã BẬT giảm giá (-${calculateDiscountPercentage(flower.price, updatedOriginalPrice)}%) cho "${flower.name}"!`
+                                        : `⚪ Đã TẮT giảm giá cho "${flower.name}"!`
+                                    );
+                                  }}
+                                  className="w-4 h-4 accent-rose-600 rounded cursor-pointer"
+                                />
+                                <span className={`text-xs font-bold ${hasDiscount ? 'text-rose-600' : 'text-stone-400'}`}>
+                                  {hasDiscount ? `-${discountPct}%` : 'Tắt'}
+                                </span>
+                              </label>
+                            </td>
+
+                            {/* Direct Toggle: Còn hàng */}
+                            <td className="py-3 px-3 text-center bg-emerald-50/20 border-r border-emerald-100/50">
+                              <label className="inline-flex items-center justify-center gap-1.5 cursor-pointer bg-white px-2.5 py-1.5 rounded-lg border border-stone-200 hover:border-emerald-300 shadow-2xs transition-all select-none">
+                                <input
+                                  type="checkbox"
+                                  checked={isInStock}
+                                  onChange={(e) => {
+                                    const checked = e.target.checked;
+                                    onSaveFlower({ ...flower, inStock: checked });
+                                    triggerNotification(
+                                      checked
+                                        ? `✅ "${flower.name}" ➔ CÒN HÀNG`
+                                        : `🚫 "${flower.name}" ➔ HẾT HÀNG`
+                                    );
+                                  }}
+                                  className="w-4 h-4 accent-emerald-600 rounded cursor-pointer"
+                                />
+                                <span className={`text-xs font-bold ${isInStock ? 'text-emerald-700' : 'text-stone-400 line-through'}`}>
+                                  {isInStock ? 'Còn hàng' : 'Hết hàng'}
+                                </span>
+                              </label>
+                            </td>
+
+                            <td className="py-3 px-3 font-medium text-emerald-800 bg-emerald-50/60 rounded">
+                              {flower.unitQuantity || '10 cành'}
+                            </td>
+                            <td className="py-3 px-3 text-center">
+                              <div className="flex items-center justify-center gap-2">
+                                <button
+                                  onClick={() => handleStartEdit(flower)}
+                                  className="p-1.5 text-stone-700 hover:text-rose-600 hover:bg-rose-100 rounded-lg transition-colors cursor-pointer"
+                                  title="Sửa chi tiết sản phẩm"
+                                >
+                                  <Edit2 className="w-4 h-4" />
+                                </button>
+                                <button
+                                  onClick={() => setDeletingFlowerItem(flower)}
+                                  className="p-1.5 text-stone-400 hover:text-rose-700 hover:bg-rose-100 rounded-lg transition-colors cursor-pointer"
+                                  title="Xóa sản phẩm"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -691,7 +843,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
           <span>Dữ liệu được tự động sao lưu trên trình duyệt của bạn</span>
           <button
             onClick={onClose}
-            className="px-4 py-2 bg-stone-900 text-white font-medium rounded-lg hover:bg-stone-800 transition-colors"
+            className="px-4 py-2 bg-stone-900 text-white font-medium rounded-lg hover:bg-stone-800 transition-colors cursor-pointer"
           >
             Đóng Trang Quản Lý
           </button>
@@ -704,6 +856,88 @@ export const AdminModal: React.FC<AdminModalProps> = ({
         onClose={() => setIsImportModalOpen(false)}
         onImportFlowers={handleBatchImport}
       />
+
+      {/* Confirmation Modal: Reset Default Flowers */}
+      {showResetConfirm && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-stone-900/70 backdrop-blur-xs animate-fade-in">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-stone-200 space-y-4">
+            <div className="flex items-center gap-3 text-amber-600">
+              <div className="p-2.5 bg-amber-100 rounded-xl">
+                <RotateCcw className="w-6 h-6 text-amber-700" />
+              </div>
+              <div>
+                <h3 className="font-serif font-bold text-lg text-stone-900">Xác Nhận Khôi Phục Dữ Liệu Mẫu</h3>
+                <p className="text-xs text-stone-500">Thao tác này sẽ đặt lại danh sách sản phẩm</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-stone-600 leading-relaxed bg-stone-50 p-3 rounded-xl border border-stone-200">
+              Bạn có chắc chắn muốn xóa tất cả chỉnh sửa hiện tại và khôi phục về <strong className="text-stone-900">24 mẫu hoa tươi mặc định</strong> ban đầu không?
+            </p>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                onClick={() => setShowResetConfirm(false)}
+                className="px-4 py-2 text-xs font-semibold text-stone-600 hover:bg-stone-100 rounded-lg transition-colors cursor-pointer"
+              >
+                Hủy Bỏ
+              </button>
+              <button
+                onClick={() => {
+                  onResetDefault();
+                  setShowResetConfirm(false);
+                  triggerNotification('↺ Đã khôi phục danh sách 24 mẫu hoa mặc định ban đầu!');
+                }}
+                className="px-4 py-2 text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 rounded-lg transition-colors shadow-xs cursor-pointer flex items-center gap-1.5"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Khôi Phục Ngay</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation Modal: Delete Flower Item */}
+      {deletingFlowerItem && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-stone-900/70 backdrop-blur-xs animate-fade-in">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-stone-200 space-y-4">
+            <div className="flex items-center gap-3 text-rose-600">
+              <div className="p-2.5 bg-rose-100 rounded-xl">
+                <Trash2 className="w-6 h-6 text-rose-700" />
+              </div>
+              <div>
+                <h3 className="font-serif font-bold text-lg text-stone-900">Xác Nhận Xóa Sản Phẩm</h3>
+                <p className="text-xs text-stone-500">Xóa khỏi danh sách cửa hàng</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-stone-600 leading-relaxed bg-stone-50 p-3 rounded-xl border border-stone-200">
+              Bạn có chắc chắn muốn xóa mẫu hoa <strong className="text-stone-900">"{deletingFlowerItem.name}"</strong> không?
+            </p>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                onClick={() => setDeletingFlowerItem(null)}
+                className="px-4 py-2 text-xs font-semibold text-stone-600 hover:bg-stone-100 rounded-lg transition-colors cursor-pointer"
+              >
+                Hủy Bỏ
+              </button>
+              <button
+                onClick={() => {
+                  onDeleteFlower(deletingFlowerItem.id);
+                  setDeletingFlowerItem(null);
+                  triggerNotification(`🗑️ Đã xóa sản phẩm "${deletingFlowerItem.name}"!`);
+                }}
+                className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-lg transition-colors shadow-xs cursor-pointer flex items-center gap-1.5"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Xác Nhận Xóa</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

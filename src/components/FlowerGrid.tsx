@@ -1,8 +1,8 @@
-import React from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { FlowerItem, OccasionId, FlowerCategory } from '../types';
 import { OCCASIONS, CATEGORIES } from '../data/flowers';
 import { FlowerCard } from './FlowerCard';
-import { SlidersHorizontal, Sparkles, Filter, RefreshCw } from 'lucide-react';
+import { SlidersHorizontal, Sparkles, Filter, RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react';
 
 interface FlowerGridProps {
   flowers: FlowerItem[];
@@ -29,11 +29,20 @@ export const FlowerGrid: React.FC<FlowerGridProps> = ({
   sortBy,
   setSortBy,
 }) => {
-  const [showOnlyDiscount, setShowOnlyDiscount] = React.useState(false);
-  const [showOnlyBestSeller, setShowOnlyBestSeller] = React.useState(false);
+  const [showOnlyDiscount, setShowOnlyDiscount] = useState(false);
+  const [showOnlyBestSeller, setShowOnlyBestSeller] = useState(false);
+
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(8);
+
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [selectedOccasion, selectedCategory, showOnlyDiscount, showOnlyBestSeller, sortBy, itemsPerPage]);
 
   // Filter flowers
-  const filteredFlowers = React.useMemo(() => {
+  const filteredFlowers = useMemo(() => {
     return flowers
       .filter((flower) => {
         // Occasion filter
@@ -55,13 +64,38 @@ export const FlowerGrid: React.FC<FlowerGridProps> = ({
         return true;
       })
       .sort((a, b) => {
+        const aInStock = a.inStock !== false;
+        const bInStock = b.inStock !== false;
+
+        // Push out-of-stock items to the bottom
+        if (aInStock && !bInStock) return -1;
+        if (!aInStock && bInStock) return 1;
+
         if (sortBy === 'price-asc') return a.price - b.price;
         if (sortBy === 'price-desc') return b.price - a.price;
         if (sortBy === 'rating') return (b.rating || 5) - (a.rating || 5);
-        // popular
-        return (b.reviewsCount || 0) - (a.reviewsCount || 0);
+        // Default: Sort from newest added to oldest
+        return (b.createdAt || 0) - (a.createdAt || 0);
       });
   }, [flowers, selectedOccasion, selectedCategory, showOnlyDiscount, showOnlyBestSeller, sortBy]);
+
+  // Pagination Math
+  const totalPages = Math.ceil(filteredFlowers.length / itemsPerPage) || 1;
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const endIndex = Math.min(startIndex + itemsPerPage, filteredFlowers.length);
+
+  const paginatedFlowers = useMemo(() => {
+    return filteredFlowers.slice(startIndex, startIndex + itemsPerPage);
+  }, [filteredFlowers, startIndex, itemsPerPage]);
+
+  const handlePageChange = (newPage: number) => {
+    if (newPage < 1 || newPage > totalPages) return;
+    setCurrentPage(newPage);
+    const catalogElement = document.getElementById('flower-catalog');
+    if (catalogElement) {
+      catalogElement.scrollIntoView({ behavior: 'smooth' });
+    }
+  };
 
   const resetFilters = () => {
     setSelectedOccasion('all');
@@ -69,6 +103,7 @@ export const FlowerGrid: React.FC<FlowerGridProps> = ({
     setShowOnlyDiscount(false);
     setShowOnlyBestSeller(false);
     setSortBy('popular');
+    setCurrentPage(1);
   };
 
   return (
@@ -106,97 +141,154 @@ export const FlowerGrid: React.FC<FlowerGridProps> = ({
         })}
       </div>
 
-      {/* Category Pills & Control Row */}
-      <div className="bg-stone-50 border border-stone-200/80 rounded-2xl p-4 mb-8 flex flex-wrap items-center justify-between gap-4">
-        {/* Categories Pills */}
-        <div className="flex flex-wrap items-center gap-1.5">
-          {CATEGORIES.map((cat) => {
-            const isActive = selectedCategory === cat.id;
-            return (
-              <button
-                key={cat.id}
-                onClick={() => setSelectedCategory(cat.id as FlowerCategory)}
-                className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all ${
-                  isActive
-                    ? 'bg-stone-900 text-white font-semibold'
-                    : 'text-stone-600 hover:text-stone-900 hover:bg-stone-200/60'
-                }`}
-              >
-                {cat.name}
-              </button>
-            );
-          })}
-        </div>
 
-        {/* Controls: Discount Checkbox, Best seller, Sort By */}
-        <div className="flex flex-wrap items-center gap-3 text-xs sm:text-sm ml-auto">
-          <label className="flex items-center gap-1.5 cursor-pointer select-none text-stone-700 font-medium">
-            <input
-              type="checkbox"
-              checked={showOnlyDiscount}
-              onChange={(e) => setShowOnlyDiscount(e.target.checked)}
-              className="accent-rose-600 rounded text-rose-600"
-            />
-            <span>Đang giảm giá</span>
-          </label>
 
-          <label className="flex items-center gap-1.5 cursor-pointer select-none text-stone-700 font-medium">
-            <input
-              type="checkbox"
-              checked={showOnlyBestSeller}
-              onChange={(e) => setShowOnlyBestSeller(e.target.checked)}
-              className="accent-amber-500 rounded text-amber-500"
-            />
-            <span>Bán chạy nhất</span>
-          </label>
+      {/* Counter & Active Filter Indicators + Top Pagination Bar */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs sm:text-sm text-stone-500 mb-6 bg-stone-50/70 p-3 sm:p-4 rounded-2xl border border-stone-200/80">
+        <div className="flex items-center gap-2 flex-wrap">
+          {filteredFlowers.length > 0 ? (
+            <div>
+              Hiển thị <span className="font-bold text-stone-900">{startIndex + 1} - {endIndex}</span> trong tổng số{' '}
+              <span className="font-bold text-stone-900">{filteredFlowers.length}</span> mẫu hoa tươi
+            </div>
+          ) : (
+            <span>Không có sản phẩm nào</span>
+          )}
 
-          {/* Sort selector */}
-          <div className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-lg border border-stone-200 shadow-2xs">
-            <SlidersHorizontal className="w-3.5 h-3.5 text-stone-500" />
-            <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as any)}
-              className="bg-transparent border-none text-xs font-medium text-stone-800 focus:outline-none cursor-pointer"
+          {(selectedOccasion !== 'all' || selectedCategory !== 'all' || showOnlyDiscount || showOnlyBestSeller) && (
+            <button
+              onClick={resetFilters}
+              className="flex items-center gap-1 text-rose-600 hover:text-rose-800 font-medium transition-colors ml-2"
             >
-              <option value="popular">Nổi bật & Bán chạy</option>
-              <option value="price-asc">Giá: Thấp đến Cao</option>
-              <option value="price-desc">Giá: Cao đến Thấp</option>
-              <option value="rating">Đánh giá cao nhất</option>
-            </select>
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>Xóa bộ lọc</span>
+            </button>
+          )}
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between sm:justify-end gap-3">
+          {/* Items per page selector */}
+          {filteredFlowers.length > 8 && (
+            <div className="flex items-center gap-1.5 text-xs">
+              <span className="text-stone-500 hidden md:inline">Hiển thị:</span>
+              <select
+                value={itemsPerPage}
+                onChange={(e) => setItemsPerPage(Number(e.target.value))}
+                className="bg-white border border-stone-200 rounded-lg px-2 py-1 text-xs font-semibold focus:outline-none cursor-pointer shadow-2xs"
+              >
+                <option value={8}>8 / trang (2 hàng)</option>
+                <option value={12}>12 / trang (3 hàng)</option>
+                <option value={16}>16 / trang (4 hàng)</option>
+                <option value={24}>24 / trang</option>
+              </select>
+            </div>
+          )}
+
+          {/* Top Compact Pagination Buttons */}
+          {totalPages > 1 && (
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => handlePageChange(currentPage - 1)}
+                disabled={currentPage === 1}
+                className="p-1.5 rounded-lg border border-stone-200 bg-white text-stone-700 hover:bg-rose-50 disabled:opacity-30 disabled:hover:bg-white text-xs transition-all shadow-2xs"
+                title="Trang trước"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+
+              <span className="text-xs font-bold text-stone-800 px-2 bg-white py-1 rounded-lg border border-stone-200 shadow-2xs">
+                {currentPage}/{totalPages}
+              </span>
+
+              <button
+                onClick={() => handlePageChange(currentPage + 1)}
+                disabled={currentPage === totalPages}
+                className="p-1.5 rounded-lg border border-stone-200 bg-white text-stone-700 hover:bg-rose-50 disabled:opacity-30 disabled:hover:bg-white text-xs transition-all shadow-2xs"
+                title="Trang sau"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Flower Grid Items */}
+      {paginatedFlowers.length > 0 ? (
+        <>
+          <div className="grid grid-cols-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 sm:gap-4 lg:gap-6">
+            {paginatedFlowers.map((flower) => (
+              <FlowerCard
+                key={flower.id}
+                flower={flower}
+                isFavorite={favorites.includes(flower.id)}
+                onToggleFavorite={onToggleFavorite}
+                onQuickView={onQuickView}
+              />
+            ))}
           </div>
-        </div>
-      </div>
 
-      {/* Counter & Active Filter Indicators */}
-      <div className="flex items-center justify-between text-xs sm:text-sm text-stone-500 mb-6">
-        <div>
-          Hiển thị <span className="font-bold text-stone-900">{filteredFlowers.length}</span> sản phẩm hoa tươi
-        </div>
+          {/* Pagination Controls Bar */}
+          {totalPages > 1 && (
+            <div className="mt-10 pt-6 border-t border-stone-200 flex flex-col sm:flex-row items-center justify-between gap-4">
+              <span className="text-xs text-stone-500">
+                Trang <span className="font-bold text-stone-900">{currentPage}</span> / <span className="font-bold text-stone-900">{totalPages}</span>
+              </span>
 
-        {(selectedOccasion !== 'all' || selectedCategory !== 'all' || showOnlyDiscount || showOnlyBestSeller) && (
-          <button
-            onClick={resetFilters}
-            className="flex items-center gap-1 text-rose-600 hover:text-rose-800 font-medium transition-colors"
-          >
-            <RefreshCw className="w-3.5 h-3.5" />
-            <span>Xóa bộ lọc</span>
-          </button>
-        )}
-      </div>
+              <div className="flex items-center gap-1.5">
+                {/* Previous Page Button */}
+                <button
+                  onClick={() => handlePageChange(currentPage - 1)}
+                  disabled={currentPage === 1}
+                  className="px-3 py-2 rounded-xl border border-stone-200 bg-white text-stone-700 hover:bg-rose-50 disabled:opacity-40 disabled:hover:bg-white text-xs font-semibold flex items-center gap-1 transition-all"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                  <span className="hidden xs:inline">Trang trước</span>
+                </button>
 
-      {/* Flower Grid Items (3 columns on mobile) */}
-      {filteredFlowers.length > 0 ? (
-        <div className="grid grid-cols-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 sm:gap-4 lg:gap-6">
-          {filteredFlowers.map((flower) => (
-            <FlowerCard
-              key={flower.id}
-              flower={flower}
-              isFavorite={favorites.includes(flower.id)}
-              onToggleFavorite={onToggleFavorite}
-              onQuickView={onQuickView}
-            />
-          ))}
-        </div>
+                {/* Page Number Buttons */}
+                {Array.from({ length: totalPages }, (_, i) => i + 1).map((pageNum) => {
+                  // Show max 5 numbers cleanly around currentPage
+                  if (
+                    totalPages > 7 &&
+                    pageNum !== 1 &&
+                    pageNum !== totalPages &&
+                    Math.abs(pageNum - currentPage) > 1
+                  ) {
+                    if (pageNum === 2 && currentPage > 3) return <span key={pageNum} className="text-stone-400 px-1 text-xs">...</span>;
+                    if (pageNum === totalPages - 1 && currentPage < totalPages - 2) return <span key={pageNum} className="text-stone-400 px-1 text-xs">...</span>;
+                    return null;
+                  }
+
+                  const isActive = pageNum === currentPage;
+                  return (
+                    <button
+                      key={pageNum}
+                      onClick={() => handlePageChange(pageNum)}
+                      className={`w-9 h-9 rounded-xl text-xs font-bold transition-all ${
+                        isActive
+                          ? 'bg-rose-600 text-white shadow-md scale-105'
+                          : 'bg-white border border-stone-200 text-stone-700 hover:bg-stone-100'
+                      }`}
+                    >
+                      {pageNum}
+                    </button>
+                  );
+                })}
+
+                {/* Next Page Button */}
+                <button
+                  onClick={() => handlePageChange(currentPage + 1)}
+                  disabled={currentPage === totalPages}
+                  className="px-3 py-2 rounded-xl border border-stone-200 bg-white text-stone-700 hover:bg-rose-50 disabled:opacity-40 disabled:hover:bg-white text-xs font-semibold flex items-center gap-1 transition-all"
+                >
+                  <span className="hidden xs:inline">Trang sau</span>
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
+        </>
       ) : (
         <div className="bg-rose-50/50 border border-rose-100 rounded-3xl p-12 text-center max-w-lg mx-auto my-8">
           <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center mx-auto text-rose-500 mb-4 shadow-sm">

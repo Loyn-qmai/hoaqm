@@ -23,6 +23,7 @@ export interface FlowerItem {
   isNew?: boolean;
   inStock: boolean;
   stockCount?: number;
+  createdAt?: number;
 }
 
 export type BouquetSize = 'standard' | 'medium' | 'premium';

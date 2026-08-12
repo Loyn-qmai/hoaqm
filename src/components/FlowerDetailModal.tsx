@@ -1,7 +1,8 @@
 import React from 'react';
 import { X, Star, Heart, Check, Sparkles, PhoneCall, MessageCircle } from 'lucide-react';
 import { FlowerItem } from '../types';
-import { formatVND, calculateDiscountPercentage } from '../utils/format';
+import { formatVND, calculateDiscountPercentage, convertGoogleDriveUrl } from '../utils/format';
+import { getMatchingFlowerImage } from '../utils/imageMatcher';
 
 interface FlowerDetailModalProps {
   flower: FlowerItem | null;
@@ -42,10 +43,27 @@ export const FlowerDetailModal: React.FC<FlowerDetailModalProps> = ({
           <div className="p-6 bg-stone-50 flex flex-col justify-center items-center relative">
             <div className="relative w-full aspect-1/1 rounded-2xl overflow-hidden shadow-md">
               <img
-                src={flower.imageUrl}
+                src={convertGoogleDriveUrl(flower.imageUrl) || flower.imageUrl || getMatchingFlowerImage(flower.name, flower.category)}
                 alt={flower.name}
                 referrerPolicy="no-referrer"
                 className="w-full h-full object-cover"
+                onError={(e) => {
+                  const target = e.currentTarget;
+                  if (target.src.includes('lh3.googleusercontent.com/d/')) {
+                    const fileIdMatch = target.src.match(/\/d\/([a-zA-Z0-9_-]+)/);
+                    if (fileIdMatch && fileIdMatch[1]) {
+                      target.src = `https://drive.google.com/thumbnail?id=${fileIdMatch[1]}&sz=w1000`;
+                      return;
+                    }
+                  } else if (target.src.includes('drive.google.com/thumbnail')) {
+                    const fileIdMatch = target.src.match(/id=([a-zA-Z0-9_-]+)/);
+                    if (fileIdMatch && fileIdMatch[1]) {
+                      target.src = `https://drive.google.com/uc?export=view&id=${fileIdMatch[1]}`;
+                      return;
+                    }
+                  }
+                  target.src = getMatchingFlowerImage(flower.name, flower.category);
+                }}
               />
               {discountPercent > 0 && (
                 <span className="absolute top-3 left-3 bg-red-600 text-white text-xs font-bold px-3 py-1 rounded-full shadow-xs">
