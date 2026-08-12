@@ -1,0 +1,6 @@
+{
+  "name": "Tiệm Hoa Tươi QM",
+  "description": "Website bán hoa tươi tươi đẹp, chuyên trang trí, sự kiện, ngày lễ.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
