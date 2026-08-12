@@ -280,22 +280,72 @@ export const AdminImportModal: React.FC<AdminImportModalProps> = ({
     setErrorMessage(null);
 
     try {
-      const response = await fetch('/api/fetch-gsheet', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sheetUrl: gsheetUrl }),
-      });
+      let csvContent = '';
+      let serverError = '';
 
-      const data = await response.json();
-      if (!data.success) {
-        throw new Error(data.error || 'Không thể tải Google Sheet');
+      // Try server API route first
+      try {
+        const response = await fetch('/api/fetch-gsheet', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sheetUrl: gsheetUrl }),
+        });
+
+        const contentType = response.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          const data = await response.json();
+          if (data.success && data.csvText) {
+            csvContent = data.csvText;
+          } else if (data.error) {
+            serverError = data.error;
+          }
+        }
+      } catch (err: any) {
+        console.warn('Server fetch error:', err);
       }
 
-      Papa.parse(data.csvText, {
+      // If server route didn't return csvContent, try client-side direct gviz fetch
+      if (!csvContent) {
+        const docIdMatch = gsheetUrl.match(/\/d\/([a-zA-Z0-9-_]+)/);
+        const gidMatch = gsheetUrl.match(/[?&]gid=(\d+)/) || gsheetUrl.match(/#gid=(\d+)/);
+        if (docIdMatch && docIdMatch[1]) {
+          const docId = docIdMatch[1];
+          const gid = gidMatch ? gidMatch[1] : '0';
+          const directUrl = `https://docs.google.com/spreadsheets/d/${docId}/gviz/tq?tqx=out:csv&gid=${gid}`;
+          try {
+            const res = await fetch(directUrl);
+            if (res.ok) {
+              const txt = await res.text();
+              if (
+                !txt.trim().toLowerCase().startsWith('<!doctype') &&
+                !txt.trim().toLowerCase().startsWith('<html') &&
+                !txt.includes('ServiceLogin')
+              ) {
+                csvContent = txt;
+              }
+            }
+          } catch (e) {
+            console.warn('Direct fetch error:', e);
+          }
+        }
+      }
+
+      if (!csvContent) {
+        throw new Error(
+          serverError ||
+            "Trang tính Google Sheet chưa bật quyền công khai. Vui lòng mở Google Sheet -> Bấm nút 'Chia sẻ' ở góc phải -> Chọn 'Bất kỳ ai có liên kết đều có thể xem' rồi nhấn 'Tải Dữ Liệu' lại!"
+        );
+      }
+
+      Papa.parse(csvContent, {
         header: true,
         skipEmptyLines: true,
         complete: (results) => {
-          processRawRows(results.data as Record<string, any>[]);
+          if (results.data && results.data.length > 0) {
+            processRawRows(results.data as Record<string, any>[]);
+          } else {
+            setErrorMessage('Trang tính Google Sheet rỗng hoặc không chứa bảng dữ liệu.');
+          }
         },
       });
     } catch (err: any) {

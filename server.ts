@@ -95,28 +95,63 @@ Quy tắc danh mục (category):
   app.post("/api/fetch-gsheet", async (req, res) => {
     try {
       const { sheetUrl } = req.body;
-      if (!sheetUrl) {
+      if (!sheetUrl || typeof sheetUrl !== "string") {
         return res.status(400).json({ success: false, error: "Thiếu đường dẫn Google Sheets" });
       }
 
-      let csvUrl = sheetUrl;
-      if (sheetUrl.includes("docs.google.com/spreadsheets")) {
-        // Transform edit link to export CSV link
-        csvUrl = sheetUrl.replace(/\/edit.*$/, "/export?format=csv");
-        if (!csvUrl.includes("format=csv")) {
-          csvUrl += (csvUrl.includes("?") ? "&" : "?") + "format=csv";
-        }
+      let csvUrl = sheetUrl.trim();
+      const docIdMatch = csvUrl.match(/\/d\/([a-zA-Z0-9-_]+)/);
+      const gidMatch = csvUrl.match(/[?&]gid=(\d+)/) || csvUrl.match(/#gid=(\d+)/);
+
+      if (docIdMatch && docIdMatch[1]) {
+        const docId = docIdMatch[1];
+        const gid = gidMatch ? gidMatch[1] : "0";
+        // Primary CSV export endpoint using Google Visualization gviz
+        csvUrl = `https://docs.google.com/spreadsheets/d/${docId}/gviz/tq?tqx=out:csv&gid=${gid}`;
       }
 
-      const response = await fetch(csvUrl);
-      if (!response.ok) {
-        return res.status(400).json({
-          success: false,
-          error: "Không thể tải trang Google Sheet. Hãy đảm bảo trang tính đã mở quyền truy cập 'Bất kỳ ai có link'.",
+      let response = await fetch(csvUrl, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        },
+      });
+
+      if (!response.ok && docIdMatch) {
+        // Fallback to export?format=csv
+        const docId = docIdMatch[1];
+        const gid = gidMatch ? gidMatch[1] : "0";
+        const fallbackUrl = `https://docs.google.com/spreadsheets/d/${docId}/export?format=csv&gid=${gid}`;
+        response = await fetch(fallbackUrl, {
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          },
         });
       }
 
       const csvText = await response.text();
+      const trimmedText = csvText.trim();
+
+      // Check if returned content is HTML (meaning restricted access or Google Login page)
+      if (
+        trimmedText.toLowerCase().startsWith("<!doctype html") ||
+        trimmedText.toLowerCase().startsWith("<html") ||
+        trimmedText.includes("ServiceLogin") ||
+        trimmedText.includes("The page") ||
+        trimmedText.includes("Google Drive -- Page Not Found")
+      ) {
+        return res.status(400).json({
+          success: false,
+          error: "Trang tính Google Sheet chưa được bật quyền công khai. Vui lòng bấm nút 'Chia sẻ' ở góc phải Google Sheet -> đổi thành 'Bất kỳ ai có liên kết đều có thể xem' rồi nhấn 'Tải Dữ Liệu' lại!",
+        });
+      }
+
+      if (!trimmedText) {
+        return res.status(400).json({
+          success: false,
+          error: "Trang tính Google Sheet rỗng hoặc không có dữ liệu.",
+        });
+      }
+
       return res.json({ success: true, csvText });
     } catch (error: any) {
       console.error("Error fetching Google Sheet:", error);
