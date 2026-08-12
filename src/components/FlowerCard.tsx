@@ -2,6 +2,7 @@ import React from 'react';
 import { Heart, Eye, ShoppingBag, Star, Sparkles, Check } from 'lucide-react';
 import { FlowerItem } from '../types';
 import { formatVND, calculateDiscountPercentage } from '../utils/format';
+import { getMatchingFlowerImage } from '../utils/imageMatcher';
 
 interface FlowerCardProps {
   flower: FlowerItem;
@@ -30,6 +31,17 @@ export const FlowerCard: React.FC<FlowerCardProps> = ({
           alt={flower.name}
           referrerPolicy="no-referrer"
           className="w-full h-full object-cover group-hover:scale-108 transition-transform duration-700 ease-out"
+          onError={(e) => {
+            const target = e.currentTarget;
+            if (target.src.includes('drive.google.com/thumbnail')) {
+              const fileIdMatch = target.src.match(/id=([a-zA-Z0-9_-]+)/);
+              if (fileIdMatch && fileIdMatch[1]) {
+                target.src = `https://lh3.googleusercontent.com/d/${fileIdMatch[1]}`;
+                return;
+              }
+            }
+            target.src = getMatchingFlowerImage(flower.name, flower.category);
+          }}
         />
 
         {/* Overlay backdrop on hover */}

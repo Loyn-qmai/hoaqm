@@ -120,7 +120,10 @@ export const AdminImportModal: React.FC<AdminImportModalProps> = ({
       const category = mapCategory(row[catKey]);
       const description = row[descKey] ? String(row[descKey]).trim() : 'Hoa tươi chọn lọc nhập mới trong ngày';
       const rawImgUrl = row[imageKey] ? String(row[imageKey]).trim() : '';
-      const imageUrl = convertGoogleDriveUrl(rawImgUrl);
+      let imageUrl = convertGoogleDriveUrl(rawImgUrl);
+      if (imageUrl && !/^(https?:\/\/|data:image)/i.test(imageUrl)) {
+        imageUrl = '';
+      }
 
       items.push({
         id: `imported-${Date.now()}-${idx}`,
@@ -281,6 +284,7 @@ export const AdminImportModal: React.FC<AdminImportModalProps> = ({
 
     try {
       let csvContent = '';
+      let parsedRows: Record<string, string>[] = [];
       let serverError = '';
 
       // Try server API route first
@@ -294,8 +298,13 @@ export const AdminImportModal: React.FC<AdminImportModalProps> = ({
         const contentType = response.headers.get('content-type') || '';
         if (contentType.includes('application/json')) {
           const data = await response.json();
-          if (data.success && data.csvText) {
-            csvContent = data.csvText;
+          if (data.success) {
+            if (data.parsedRows && data.parsedRows.length > 0) {
+              parsedRows = data.parsedRows;
+            }
+            if (data.csvText) {
+              csvContent = data.csvText;
+            }
           } else if (data.error) {
             serverError = data.error;
           }
@@ -304,7 +313,13 @@ export const AdminImportModal: React.FC<AdminImportModalProps> = ({
         console.warn('Server fetch error:', err);
       }
 
-      // If server route didn't return csvContent, try client-side direct gviz fetch
+      // If server route extracted hyperlinked rows directly
+      if (parsedRows.length > 0) {
+        processRawRows(parsedRows);
+        return;
+      }
+
+      // If server route didn't return csvContent or parsedRows, try client-side direct gviz fetch
       if (!csvContent) {
         const docIdMatch = gsheetUrl.match(/\/d\/([a-zA-Z0-9-_]+)/);
         const gidMatch = gsheetUrl.match(/[?&]gid=(\d+)/) || gsheetUrl.match(/#gid=(\d+)/);
@@ -669,8 +684,19 @@ export const AdminImportModal: React.FC<AdminImportModalProps> = ({
                             <div className="flex items-center gap-2">
                               <img
                                 src={matchedImg}
-                                alt="Matched flower"
+                                alt={item.name}
                                 className="w-8 h-8 object-cover rounded border border-stone-200"
+                                onError={(e) => {
+                                  const target = e.currentTarget;
+                                  if (target.src.includes('drive.google.com/thumbnail')) {
+                                    const fileIdMatch = target.src.match(/id=([a-zA-Z0-9_-]+)/);
+                                    if (fileIdMatch && fileIdMatch[1]) {
+                                      target.src = `https://lh3.googleusercontent.com/d/${fileIdMatch[1]}`;
+                                      return;
+                                    }
+                                  }
+                                  target.src = getMatchingFlowerImage(item.name || '', item.category);
+                                }}
                               />
                               {!item.imageUrl && autoMatchMissingImages && (
                                 <span className="text-[10px] text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded font-medium">

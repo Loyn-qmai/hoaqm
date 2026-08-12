@@ -91,7 +91,72 @@ Quy tắc danh mục (category):
     }
   });
 
-  // API Endpoint: Fetch public Google Sheets CSV
+  // Helper: Parse Google Sheets HTML table to extract hyperlinked cell URLs
+  function parseGsheetHtmlTable(htmlText: string): Record<string, string>[] {
+    const rows: Record<string, string>[] = [];
+    const trMatches = htmlText.match(/<tr[^>]*>([\s\S]*?)<\/tr>/gi);
+    if (!trMatches || trMatches.length === 0) return rows;
+
+    const headers: string[] = [];
+    const firstTr = trMatches[0];
+    const tdMatches = firstTr.match(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi) || [];
+    tdMatches.forEach((td) => {
+      const cleanText = td.replace(/<[^>]+>/g, "").replace(/&nbsp;/gi, " ").trim();
+      headers.push(cleanText);
+    });
+
+    if (headers.length === 0) return rows;
+
+    for (let i = 1; i < trMatches.length; i++) {
+      const tr = trMatches[i];
+      const cells = tr.match(/<td[^>]*>([\s\S]*?)<\/td>/gi) || [];
+      if (cells.length === 0) continue;
+
+      const rowObj: Record<string, string> = {};
+      let hasData = false;
+
+      cells.forEach((cell, colIdx) => {
+        const headerName = headers[colIdx] || `Col_${colIdx}`;
+        const linkMatch = cell.match(/<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i);
+        const textWithoutTags = cell.replace(/<[^>]+>/g, "").replace(/&nbsp;/gi, " ").trim();
+
+        if (linkMatch && linkMatch[1]) {
+          let href = linkMatch[1].trim();
+          if (href.includes("google.com/url?") || href.includes("google.com/url%3F")) {
+            const qMatch = href.match(/[?&]q=([^&]+)/);
+            if (qMatch && qMatch[1]) {
+              href = decodeURIComponent(qMatch[1]);
+            }
+          }
+
+          if (
+            /ảnh|hình|image|url|link/i.test(headerName) ||
+            /drive\.google\.com|googleusercontent|http/i.test(href)
+          ) {
+            rowObj[headerName] = href;
+          } else if (/^(https?:\/\/|drive\.google)/i.test(textWithoutTags)) {
+            rowObj[headerName] = textWithoutTags;
+          } else {
+            rowObj[headerName] = href || textWithoutTags;
+          }
+        } else {
+          rowObj[headerName] = textWithoutTags;
+        }
+
+        if (rowObj[headerName]) {
+          hasData = true;
+        }
+      });
+
+      if (hasData) {
+        rows.push(rowObj);
+      }
+    }
+
+    return rows;
+  }
+
+  // API Endpoint: Fetch public Google Sheets CSV & HTML Hyperlinks
   app.post("/api/fetch-gsheet", async (req, res) => {
     try {
       const { sheetUrl } = req.body;
@@ -100,14 +165,39 @@ Quy tắc danh mục (category):
       }
 
       let csvUrl = sheetUrl.trim();
+      let htmlUrl = "";
       const docIdMatch = csvUrl.match(/\/d\/([a-zA-Z0-9-_]+)/);
       const gidMatch = csvUrl.match(/[?&]gid=(\d+)/) || csvUrl.match(/#gid=(\d+)/);
 
       if (docIdMatch && docIdMatch[1]) {
         const docId = docIdMatch[1];
         const gid = gidMatch ? gidMatch[1] : "0";
-        // Primary CSV export endpoint using Google Visualization gviz
         csvUrl = `https://docs.google.com/spreadsheets/d/${docId}/gviz/tq?tqx=out:csv&gid=${gid}`;
+        htmlUrl = `https://docs.google.com/spreadsheets/d/${docId}/gviz/tq?tqx=out:html&gid=${gid}`;
+      }
+
+      let parsedRows: Record<string, string>[] = [];
+
+      // Try HTML fetch to preserve hyperlinked cell URLs
+      if (htmlUrl) {
+        try {
+          const htmlRes = await fetch(htmlUrl, {
+            headers: {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            },
+          });
+          if (htmlRes.ok) {
+            const htmlText = await htmlRes.text();
+            if (
+              !htmlText.includes("ServiceLogin") &&
+              !htmlText.includes("Google Drive -- Page Not Found")
+            ) {
+              parsedRows = parseGsheetHtmlTable(htmlText);
+            }
+          }
+        } catch (e) {
+          console.warn("HTML table parse failed, falling back to CSV:", e);
+        }
       }
 
       let response = await fetch(csvUrl, {
@@ -117,7 +207,6 @@ Quy tắc danh mục (category):
       });
 
       if (!response.ok && docIdMatch) {
-        // Fallback to export?format=csv
         const docId = docIdMatch[1];
         const gid = gidMatch ? gidMatch[1] : "0";
         const fallbackUrl = `https://docs.google.com/spreadsheets/d/${docId}/export?format=csv&gid=${gid}`;
@@ -131,7 +220,6 @@ Quy tắc danh mục (category):
       const csvText = await response.text();
       const trimmedText = csvText.trim();
 
-      // Check if returned content is HTML (meaning restricted access or Google Login page)
       if (
         trimmedText.toLowerCase().startsWith("<!doctype html") ||
         trimmedText.toLowerCase().startsWith("<html") ||
@@ -145,14 +233,14 @@ Quy tắc danh mục (category):
         });
       }
 
-      if (!trimmedText) {
+      if (!trimmedText && parsedRows.length === 0) {
         return res.status(400).json({
           success: false,
           error: "Trang tính Google Sheet rỗng hoặc không có dữ liệu.",
         });
       }
 
-      return res.json({ success: true, csvText });
+      return res.json({ success: true, csvText, parsedRows });
     } catch (error: any) {
       console.error("Error fetching Google Sheet:", error);
       return res.status(500).json({

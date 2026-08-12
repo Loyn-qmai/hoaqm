@@ -14,11 +14,28 @@ export function calculateDiscountPercentage(price: number, originalPrice?: numbe
 export function convertGoogleDriveUrl(url: string): string {
   if (!url) return '';
   const trimmed = url.trim();
-  if (trimmed.includes('drive.google.com')) {
-    const fileIdMatch = trimmed.match(/\/file\/d\/([^\/]+)/) || trimmed.match(/id=([^&]+)/);
+
+  // If the input is plain text (e.g. flower name from a hyperlink text), it's not a valid image URL
+  if (!/^(https?:\/\/|data:image)/i.test(trimmed)) {
+    return '';
+  }
+
+  if (
+    trimmed.includes('drive.google.com') ||
+    trimmed.includes('docs.google.com') ||
+    trimmed.includes('googleusercontent.com')
+  ) {
+    const fileIdMatch =
+      trimmed.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) ||
+      trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/) ||
+      trimmed.match(/\/d\/([a-zA-Z0-9_-]+)/);
+
     if (fileIdMatch && fileIdMatch[1]) {
-      return `https://lh3.googleusercontent.com/d/${fileIdMatch[1]}`;
+      const fileId = fileIdMatch[1];
+      // Use Google Drive High-Res Thumbnail endpoint for optimal image rendering
+      return `https://drive.google.com/thumbnail?id=${fileId}&sz=w1000`;
     }
   }
+
   return trimmed;
 }
